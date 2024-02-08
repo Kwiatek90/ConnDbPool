@@ -64,6 +64,7 @@ class ConnectionPool():
             self.queue.put(conn_db) 
             self.rel_conn += 1
             self.active_conn -= 1
+
             
                     
     def cleanup_connections(self):
