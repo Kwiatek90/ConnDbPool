@@ -15,7 +15,7 @@ class ConnectionPool():
         self.active_conn = 0  
         self.rel_conn = 0
         self.start_time = time.time()
-        self.semaphore = threading.Semaphore()
+        self.semaphore = threading.Semaphore(self.max_conn)  
         self.open_threads_connections()
         self.cleanup_thread = threading.Thread(target=self.cleanup_connections, daemon=True)
         self.cleanup_thread.start()
@@ -32,41 +32,36 @@ class ConnectionPool():
     def connect_db(self):
         """Connect to the PostgreSQL database server"""
 
-        try:
-            params = config.config_params(self.database_config_path)
-            conn = psycopg2.connect(**params)
-            return conn
-        except Exception as e:
-            return e
-            
+        params = config.config_params(self.database_config_path)
+        conn = psycopg2.connect(**params)
+        return conn
         
     def get_conn(self):
         '''Take the connection from queue, if queue is empty, create one'''
         
-        with self.semaphore:
+        self.semaphore.acquire()
           
-            try:
-                conn_db = self.queue.get_nowait()
-                self.active_conn += 1
-            except Empty:
-                if (self.queue.qsize() + self.active_conn) < self.max_conn:
-                    conn_db = self.connect_db()
-                    self.active_conn +=1
-                else:  
-                    raise ValueError("Too much connections")
+        try:
+            conn_db = self.queue.get_nowait()
+            self.active_conn += 1
+        except Empty:
+            if self.active_conn < self.max_conn:
+                conn_db = self.connect_db()
+                self.active_conn +=1
+            else:  
+                raise ValueError ("Too much connections!")
             
-            return conn_db
-                   
+        return conn_db
+                
     def release_conn(self, conn_db):
         '''Release connection to the queue'''
         
-        with self.semaphore:
-            self.queue.put(conn_db) 
-            self.rel_conn += 1
-            self.active_conn -= 1
+        self.queue.put(conn_db) 
+        self.rel_conn += 1
+        self.active_conn -= 1
+        self.semaphore.release()
 
-            
-                    
+
     def cleanup_connections(self):
         '''Every 60 seconds function check connections'''
         
@@ -75,12 +70,12 @@ class ConnectionPool():
             with self.semaphore:
                 while not self.queue.empty():
                     if self.queue.qsize() > self.min_queue_conn:
-                        conn_db_obj = self.queue.get()
-                        conn_db_obj.close()
+                        conn_db = self.queue.get()
+                        conn_db.close()
                         
                         
     def check_conn(self):
         while True:
-            time.sleep(2)
+            time.sleep(0.5)
             print(f"Active conn: {self.active_conn}\nRelease conn: {self.rel_conn}\nQueue size: {self.queue.qsize()}\n")
             
